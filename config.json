@@ -1,0 +1,20 @@
+{
+  "categories": {
+    "Images": ["jpg", "jpeg", "png", "gif", "bmp", "svg", "webp", "ico", "tiff"],
+    "Videos": ["mp4", "avi", "mkv", "mov", "wmv", "flv", "webm"],
+    "Audio": ["mp3", "wav", "flac", "aac", "ogg", "m4a"],
+    "Documents": ["pdf", "doc", "docx", "txt", "xls", "xlsx", "ppt", "pptx", "csv"],
+    "Code": ["py", "java", "js", "html", "css", "cpp", "c", "json", "xml", "sql"],
+    "Archives": ["zip", "rar", "tar", "gz", "7z"],
+    "Executables": ["exe", "msi", "dmg", "pkg", "deb"]
+  },
+  "default_category": "Others",
+  "exclude_folders": ["node_modules", ".git", "__pycache__"],
+  "skip_extensions": ["crdownload", "part", "tmp", "download", "partial"],
+  "size_limits_mb": {
+    "small": 1,
+    "large": 100
+  },
+  "log_retention_days": 7,
+  "default_mode": "type"
+}
