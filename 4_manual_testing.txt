@@ -1,0 +1,985 @@
+================================================================
+  MANUAL TESTING DOCUMENT
+  Project   : Automatic File Organizer (Command Line Tool)
+  Tester    : Hruthik
+  Platforms : Windows, macOS, Linux (test on at least two)
+  Test Type : Functional + Safety + Regression
+================================================================
+
+HOW TO USE THIS DOCUMENT
+  - Go through each test case one by one
+  - Write PASS or FAIL in the [ ] column
+  - If FAIL: write what actually happened in NOTES
+  - Run again after fixing bugs (regression test)
+  - Always RESET the test folder before a test (see below)
+
+RESULT KEY
+  [P] = PASS
+  [F] = FAIL
+  [S] = SKIP (not possible on this computer / OS)
+  [B] = BLOCKED (depends on a failing test)
+
+================================================================
+SETUP - CREATE THE TEST FOLDER
+================================================================
+
+STEP 1  Install and open a terminal inside file_organizer/
+  pip install -r requirements.txt
+
+STEP 2  Save this script as make_test_files.py (any folder) and run
+        it with:  python make_test_files.py
+        It creates ~/organizer_test (C:\Users\<you>\organizer_test
+        on Windows). Run it again whenever you need a fresh folder.
+
+----------------------------------------------------------------
+"""Creates ~/organizer_test with sample files for manual testing."""
+import os
+import time
+from pathlib import Path
+
+root = Path.home() / "organizer_test"
+root.mkdir(exist_ok=True)
+
+
+def make(name, size=10, days_old=0, content=None):
+    """Create a file; optionally backdate its modified time."""
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content if content is not None else os.urandom(size))
+    if days_old:
+        stamp = time.time() - days_old * 86400
+        os.utime(path, (stamp, stamp))
+
+
+# One or more files for every default category
+for name in ["photo1.jpg", "photo2.PNG", "logo.svg", "clip.mp4", "song.mp3",
+             "report.pdf", "notes.txt", "data.csv", "script.py", "page.html",
+             "backup.zip", "setup.exe", "mystery.xyz", "README"]:
+    make(name)
+
+# Three identical files with different modified dates (duplicate finder)
+same = b"identical content for duplicate test"
+make("dup_a.txt", content=same, days_old=5)   # oldest
+make("dup_b.txt", content=same, days_old=2)
+make("dup_c.txt", content=same)               # newest
+
+make("old_photo.jpg", days_old=400)           # date mode: older year
+make("medium_video.mkv", size=2 * 1024 * 1024)  # size mode: Medium (2 MB)
+make("empty_file.txt", size=0)                # empty files are never duplicates
+make("empty_file2.txt", size=0)
+
+# Files that must be SKIPPED
+make(".hidden_file", size=5)                  # hidden
+make("download.crdownload")                   # unfinished download
+make("node_modules/lib.js")                   # excluded folder
+
+# A nested file (only moved with --recursive)
+make("subfolder/nested.docx")
+
+print("Created test folder:", root)
+----------------------------------------------------------------
+
+STEP 3  To RESET before a test: delete the folder and re-run the
+        script.
+          Mac/Linux : rm -rf ~/organizer_test
+          Windows   : rmdir /s /q %USERPROFILE%\organizer_test
+
+STEP 4  Optional large file for the "Large" size test
+        (sparse file, takes no real disk space):
+          python -c "open('big.bin','wb').truncate(101*1024*1024)"
+        Run it inside ~/organizer_test.
+
+WHAT THE TEST FOLDER CONTAINS (top level)
+  21 files that WILL be organized:
+    Images      photo1.jpg  photo2.PNG  logo.svg  old_photo.jpg   (4)
+    Videos      clip.mp4  medium_video.mkv (2 MB)                  (2)
+    Audio       song.mp3                                           (1)
+    Documents   report.pdf notes.txt data.csv dup_a.txt dup_b.txt
+                dup_c.txt empty_file.txt empty_file2.txt           (8)
+    Code        script.py  page.html                               (2)
+    Archives    backup.zip                                         (1)
+    Executables setup.exe                                          (1)
+    Others      mystery.xyz  README (no extension)                 (2)
+  4 items that must be IGNORED / left alone:
+    .hidden_file   download.crdownload   node_modules/   subfolder/
+
+  In the commands below, use your own path for ~/organizer_test.
+  Shortcut:  SRC=~/organizer_test   (Windows: use the full path)
+
+================================================================
+MODULE 1 - SETUP AND COMMAND LINE BASICS
+================================================================
+
+TEST-SETUP-001  PYTHON VERSION
+  Steps:
+    1. Run: python --version
+  Expected: Python 3.10 or newer
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SETUP-002  HELP SCREEN
+  Steps:
+    1. Run: python organizer.py --help
+  Expected:
+    - Usage text lists --source --dest --mode --preview --undo
+      --duplicates --keep --schedule --recursive --yes --config
+      --add-category --exclude --report --verbose
+    - No error
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SETUP-003  NO ARGUMENTS
+  Steps:
+    1. Run: python organizer.py
+  Expected: "error: --source is required (or use --undo)"
+            Exit code 2. No folders created.
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SETUP-004  CONFIG AND DATA FOLDERS
+  Steps:
+    1. Run any command that organizes files (e.g. TEST-TYPE-001)
+    2. Look inside ~/.file_organizer/
+  Expected: folders logs/ and operations/ exist
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 2 - SCANNING AND SKIPPING FILES
+================================================================
+
+TEST-SCAN-001  HIDDEN FILE SKIPPED
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC -y
+  Expected: .hidden_file is still in the top folder, untouched
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-002  UNFINISHED DOWNLOAD SKIPPED
+  Steps:
+    1. After TEST-SCAN-001 look for download.crdownload
+  Expected: still in the top folder, not moved
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-003  EXCLUDED FOLDER IGNORED
+  Steps:
+    1. Reset, run: python organizer.py --source SRC --recursive -y
+    2. Look at node_modules/lib.js
+  Expected: node_modules/lib.js is still inside node_modules
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-004  SUB-FOLDERS NOT SCANNED BY DEFAULT
+  Steps:
+    1. Reset, run: python organizer.py --source SRC -y
+    2. Look at subfolder/nested.docx
+  Expected: nested.docx is still inside subfolder/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-005  RECURSIVE OPTION
+  Steps:
+    1. Reset, run: python organizer.py --source SRC --recursive -y
+  Expected:
+    - nested.docx is now in Documents/
+    - The (now empty) subfolder/ is left in place
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-006  EXTENSION IS CASE-INSENSITIVE
+  Steps:
+    1. Reset, run TEST-TYPE-001
+  Expected: photo2.PNG is in Images/ (name keeps its capitals)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-007  FILE WITHOUT EXTENSION
+  Steps:
+    1. After TEST-TYPE-001 look inside Others/
+  Expected: README and mystery.xyz are both in Others/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-008  WINDOWS HIDDEN ATTRIBUTE  (Windows only)
+  Steps:
+    1. In the test folder run: attrib +h notes.txt
+    2. python organizer.py --source SRC -y
+  Expected: notes.txt is NOT moved (hidden attribute respected)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-009  OS HELPER FILES SKIPPED
+  Steps:
+    1. Create empty files named Thumbs.db and desktop.ini
+       (Mac: .DS_Store) in the test folder
+    2. python organizer.py --source SRC -y
+  Expected: those files stay in the top folder
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCAN-010  SYMBOLIC LINK SKIPPED  (Mac / Linux)
+  Steps:
+    1. ln -s report.pdf link_to_report.pdf   (in the test folder)
+    2. python organizer.py --source SRC -y
+  Expected: the link is not moved; report.pdf is moved normally
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 3 - ORGANIZE BY TYPE (default mode)
+================================================================
+
+TEST-TYPE-001  ORGANIZE BY TYPE
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC
+  Expected:
+    - Progress bar "Organizing" reaches 100%
+    - Folders created inside SRC with these file counts:
+        Images 4   Videos 2   Audio 1   Documents 8
+        Code 2     Archives 1 Executables 1   Others 2
+    - Report: "Files organized : 21", "Errors: 0"
+    - Per-category lines match the numbers above
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-TYPE-002  COLOURED OUTPUT
+  Steps:
+    1. Look at the output of TEST-TYPE-001
+  Expected: header magenta, "Files organized" number green,
+            "Errors: 0" green (no strange characters like [32m)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-TYPE-003  RUN TWICE
+  Steps:
+    1. Right after TEST-TYPE-001, run the same command again
+  Expected: "Files organized : 0", "Errors: 0". Nothing moves
+            (files are already in their folders).
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-TYPE-004  SEPARATE DESTINATION
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --dest ~/Organized
+  Expected:
+    - Category folders are created in ~/Organized
+    - SRC top level only keeps the 4 ignored items
+      (subfolder/ still contains nested.docx - not recursive)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-TYPE-005  NAME CLASH NEVER OVERWRITES
+  Steps:
+    1. Reset test folder
+    2. Create folder Images and put a file named photo1.jpg in it
+       with different content (e.g. type some text in it)
+    3. python organizer.py --source SRC -y
+  Expected:
+    - Images/photo1.jpg is unchanged (old content)
+    - The new file is Images/photo1_1.jpg
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-TYPE-006  EMPTY SOURCE FOLDER
+  Steps:
+    1. Create an empty folder ~/empty_test
+    2. python organizer.py --source ~/empty_test
+  Expected: "Files organized : 0", "Errors: 0", no crash
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 4 - DATE, SIZE AND COMBINED MODES
+================================================================
+
+TEST-DATE-001  ORGANIZE BY DATE
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --mode date -y
+  Expected:
+    - Today's files are in <current year>/<current month name>
+      (e.g. 2026/November)
+    - old_photo.jpg (400 days old) is in an EARLIER year folder
+      with its own month name
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DATE-002  MONTH NAMES IN ENGLISH
+  Steps:
+    1. Look at the month folder names from TEST-DATE-001
+  Expected: Full English names (January ... December), even if
+            your computer uses another language
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SIZE-001  ORGANIZE BY SIZE
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --mode size -y
+  Expected:
+    - Medium/ contains medium_video.mkv (2 MB)
+    - Small/ contains the other 20 files
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SIZE-002  LARGE FILES
+  Steps:
+    1. Reset test folder and create big.bin (STEP 4 in setup)
+    2. python organizer.py --source SRC --mode size -y
+  Expected: big.bin is in Large/ (more than 100 MB)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-COMB-001  ORGANIZE COMBINED
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --mode combined -y
+  Expected:
+    - Images/<current year>/<current month>/ has photo1.jpg,
+      photo2.PNG, logo.svg
+    - old_photo.jpg is in Images/<older year>/<its month>/
+    - Documents/<year>/<month>/ has the 8 documents
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-MODE-001  INVALID MODE
+  Steps:
+    1. python organizer.py --source SRC --mode bogus
+  Expected: "invalid choice: 'bogus' (choose from 'type', 'date',
+            'size', 'combined')". Exit code 2. Nothing moved.
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 5 - PREVIEW MODE
+================================================================
+
+TEST-PREV-001  PREVIEW SHOWS THE PLAN
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --preview
+       (answer N when asked)
+  Expected:
+    - "21 files will be moved"
+    - By category: Archives 1, Audio 1, Code 2, Documents 8,
+      Executables 1, Images 4, Others 2, Videos 2
+    - "Sample moves" shows 10 lines, then "... and 11 more"
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PREV-002  ANSWER N = NOTHING MOVES
+  Steps:
+    1. After TEST-PREV-001 look at the test folder
+  Expected:
+    - "Cancelled - no files were moved."
+    - All files still in the top folder, no new folders
+    - No new file in ~/.file_organizer/operations/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PREV-003  JUST PRESS ENTER = NO
+  Steps:
+    1. python organizer.py --source SRC --preview
+    2. Press Enter without typing anything
+  Expected: treated as No - nothing is moved
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PREV-004  ANSWER Y MOVES THE FILES
+  Steps:
+    1. python organizer.py --source SRC --preview
+    2. Type y and press Enter
+  Expected: same result as TEST-TYPE-001 (21 files organized)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PREV-005  PREVIEW FOR OTHER MODES
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --mode combined --preview
+       (answer N)
+  Expected: an extra "Destination folders" list such as
+            Images/2026/November  3 files
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PREV-006  NOTHING TO ORGANIZE
+  Steps:
+    1. python organizer.py --source ~/empty_test --preview
+  Expected: "Nothing to organize." and no question
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PREV-007  PREVIEW WITH --yes
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --preview --yes
+  Expected: plan is shown, NO question, files are moved
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 6 - UNDO
+================================================================
+
+TEST-UNDO-001  UNDO A FULL RUN
+  Steps:
+    1. Reset test folder, note the file list
+    2. python organizer.py --source SRC -y
+    3. python organizer.py --undo
+    4. Type y
+  Expected:
+    - Shows run date, source, mode, "Files : 21"
+    - "Restored 21 of 21 files."
+    - Test folder looks exactly like before step 2
+    - The empty category folders are gone
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-002  UNDO CANCELLED
+  Steps:
+    1. Organize, then run --undo and type n
+  Expected: "Undo cancelled." and the files stay organized
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-003  UNDO TWICE (TWO RUNS)
+  Steps:
+    1. Reset. Run: python organizer.py --source SRC --mode size -y
+    2. Create a new file new.txt in SRC
+    3. Run: python organizer.py --source SRC -y   (type mode)
+    4. python organizer.py --undo -y   -> undoes the type run
+    5. python organizer.py --undo -y   -> undoes the size run
+  Expected:
+    - Step 4 shows "Mode : type", "Restored 1 of 1 files." (only
+      new.txt was moved by that run) and new.txt is back at the top
+    - Step 5 shows "Mode : size", "Restored 21 of 21 files." and
+      the Small/ and Medium/ folders disappear
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-004  NOTHING TO UNDO
+  Steps:
+    1. Delete ~/.file_organizer/operations (or undo everything)
+    2. python organizer.py --undo
+  Expected: "Nothing to undo - no operation log found."
+            Exit code 1
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-005  ORIGINAL NAME IS TAKEN
+  Steps:
+    1. Reset, organize (type mode)
+    2. Create a NEW file called photo1.jpg in SRC top level
+    3. python organizer.py --undo -y
+  Expected:
+    - The new photo1.jpg is not overwritten
+    - The restored file is photo1_1.jpg
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-006  A MOVED FILE WAS DELETED
+  Steps:
+    1. Reset, organize (type mode)
+    2. Delete Images/photo1.jpg by hand
+    3. python organizer.py --undo -y
+  Expected:
+    - "Restored 20 of 21 files."
+    - Error line for photo1.jpg: "file no longer at its organized
+      location"
+    - The other 20 files are back in the top folder
+    - Running --undo again retries only that one file ("Files : 1");
+      it fails again because the file is really gone
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-007  UNDO WITH --dest
+  Steps:
+    1. Reset
+    2. python organizer.py --source SRC --dest ~/Organized -y
+    3. python organizer.py --undo -y
+  Expected:
+    - Files are back in SRC
+    - ~/Organized itself still exists but is empty
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-008  OPERATION LOG CONTENT
+  Steps:
+    1. Organize, then open the newest ops_*.json in
+       ~/.file_organizer/operations/
+  Expected: valid JSON with timestamp, source, dest, mode and an
+            "operations" list; each entry has src, dest, timestamp
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-UNDO-009  CTRL+C DURING A RUN
+  Steps:
+    1. Create 3000 small files in a folder (or use a big folder)
+    2. Run organizer on it and press Ctrl+C while the progress
+       bar is moving
+    3. Run: python organizer.py --undo
+  Expected:
+    - "Stopped by user." (exit code 130)
+    - --undo lists the files that were moved before the stop and
+      restores them
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 7 - DUPLICATE FINDER
+================================================================
+
+TEST-DUP-001  DUPLICATES ARE GROUPED
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --duplicates
+       (answer s)
+  Expected:
+    - "Group 1 (36 B each)" listing dup_a.txt, dup_b.txt, dup_c.txt
+      sorted oldest first
+    - Prompt: Keep [n]ewest, [o]ldest or [s]kip
+    - After s: "No files deleted."
+    - Report: "Duplicates: 1 groups, 3 files, 72 B wasted"
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-002  KEEP NEWEST
+  Steps:
+    1. Reset, run --duplicates, answer n, then y to confirm
+  Expected:
+    - "2 files (72 B) will be deleted, keeping the newest copy."
+    - dup_c.txt remains; dup_a.txt and dup_b.txt are deleted
+    - Report: "Deleted 2 duplicates, freed 72 B"
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-003  KEEP OLDEST
+  Steps:
+    1. Reset, run --duplicates, answer o, then y
+  Expected: dup_a.txt remains; dup_b.txt and dup_c.txt deleted
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-004  --keep AND --yes
+  Steps:
+    1. Reset
+    2. python organizer.py --source SRC --duplicates --keep newest --yes
+  Expected: no questions asked; dup_c.txt remains
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-005  DELETE CANCELLED
+  Steps:
+    1. Reset, run --duplicates, answer n, then answer N to the
+       "Permanently delete them?" question
+  Expected: "No files deleted." All three files still exist
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-006  EMPTY FILES ARE NOT DUPLICATES
+  Steps:
+    1. Look at the output of TEST-DUP-001
+  Expected: empty_file.txt and empty_file2.txt are NOT listed
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-007  CONTENT MATTERS, NOT THE NAME
+  Steps:
+    1. Copy report.pdf to copy_of_report.pdf
+    2. Edit one letter inside notes.txt copy (different content,
+       same size) as notes_copy.txt
+    3. python organizer.py --source SRC --duplicates (answer s)
+  Expected:
+    - report.pdf + copy_of_report.pdf are a group
+    - notes.txt + notes_copy.txt are NOT a group
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-008  DUPLICATES IN SUB-FOLDERS
+  Steps:
+    1. Copy dup_a.txt into subfolder/
+    2. Run --duplicates (answer s)
+  Expected: the copy inside subfolder/ appears in the group
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-DUP-009  NO DUPLICATES
+  Steps:
+    1. python organizer.py --source ~/empty_test --duplicates
+  Expected: "No duplicates found."
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 8 - SCHEDULING
+================================================================
+
+TEST-SCH-001  RUNS NOW, THEN WAITS
+  Steps:
+    1. Reset test folder
+    2. python organizer.py --source SRC --schedule 6
+  Expected:
+    - "Scheduled run starting" and the normal report appear at once
+    - Then: "Scheduled every 6 hour(s). Press Ctrl+C to stop."
+    - Program keeps running
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCH-002  RUNS AGAIN LATER
+  Steps:
+    1. Start: python organizer.py --source SRC --schedule 0.002
+       (0.002 hours = about 7 seconds)
+    2. While it waits, copy a new file (e.g. late.txt) into SRC
+    3. Wait about 10 seconds
+  Expected: a second "Scheduled run starting" appears and
+            late.txt is moved into Documents/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCH-003  CTRL+C STOPS THE SCHEDULER
+  Steps:
+    1. Start any --schedule command, press Ctrl+C
+  Expected: "Stopped by user." Exit code 130. No traceback.
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCH-004  INVALID HOURS
+  Steps:
+    1. python organizer.py --source SRC --schedule 0
+    2. python organizer.py --source SRC --schedule -3
+  Expected: "--schedule needs a positive number of hours" (exit 2)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-SCH-005  A FAILED RUN DOES NOT STOP THE SCHEDULER
+  Steps:
+    1. Start --schedule 0.002 on a folder
+    2. While it waits, rename the source folder
+    3. Wait for the next run
+  Expected: "Scheduled run failed: Source folder not found ..."
+            is shown, the program keeps running; rename the folder
+            back and the next run works
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 9 - CUSTOM CONFIGURATION
+================================================================
+
+TIP: use --config with a copy of config.json so your real
+     config.json is not changed (e.g. --config ~/test_config.json).
+
+TEST-CFG-001  ADD A CATEGORY
+  Steps:
+    1. python organizer.py --add-category "Ebooks=epub,mobi" --config ~/test_config.json
+    2. Create book.epub in SRC (reset first)
+    3. python organizer.py --source SRC --config ~/test_config.json -y
+  Expected:
+    - "Category 'Ebooks' now handles: epub,mobi"
+    - ~/test_config.json now contains "Ebooks"
+    - book.epub is in Ebooks/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-002  MOVE AN EXTENSION TO ANOTHER CATEGORY
+  Steps:
+    1. python organizer.py --add-category "Notes=txt" --config ~/test_config.json
+    2. Organize a fresh test folder with that config
+  Expected: notes.txt, dup_a.txt ... go to Notes/ (not Documents/)
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-003  EXCLUDE A FOLDER
+  Steps:
+    1. python organizer.py --exclude subfolder --config ~/test_config.json
+    2. Reset, run with --recursive and that config
+  Expected: "Folder 'subfolder' will be ignored";
+            nested.docx stays in subfolder/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-004  BAD --add-category TEXT
+  Steps:
+    1. python organizer.py --add-category "Ebooks"
+  Expected: "Invalid --add-category 'Ebooks'. Use NAME=ext1,ext2"
+            Exit code 2
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-005  CORRUPT CONFIG FILE
+  Steps:
+    1. Create ~/bad.json containing only:  {bad
+    2. Reset, run: python organizer.py --source SRC --config ~/bad.json -y
+  Expected:
+    - The tool still works with default categories (21 files)
+    - errors.log contains "Invalid config"
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-006  MISSING CONFIG FILE
+  Steps:
+    1. python organizer.py --source SRC --config ~/does_not_exist.json
+  Expected: the file ~/does_not_exist.json is created with the
+            default settings; the run works
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-007  CHANGE SIZE LIMITS
+  Steps:
+    1. In ~/test_config.json set "size_limits_mb": {"small": 3, "large": 5}
+    2. Reset, run: --mode size --config ~/test_config.json -y
+  Expected: medium_video.mkv (2 MB) now goes to Small/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-008  DEFAULT MODE FROM CONFIG
+  Steps:
+    1. Set "default_mode": "date" in ~/test_config.json
+    2. Run WITHOUT --mode, using --config ~/test_config.json
+  Expected: files are organized by date
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-CFG-009  SKIP MORE EXTENSIONS
+  Steps:
+    1. Add "xyz" to "skip_extensions" in ~/test_config.json
+    2. Reset, organize with that config
+  Expected: mystery.xyz stays in the top folder
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 10 - LOGGING
+================================================================
+
+TEST-LOG-001  OPERATIONS ARE LOGGED
+  Steps:
+    1. Run TEST-TYPE-001
+    2. Open ~/.file_organizer/logs/organizer.log
+  Expected: one "Moved <from> -> <to>" line per file, each with
+            date, time, level and module name
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-LOG-002  ERRORS GO TO A SEPARATE FILE
+  Steps:
+    1. After a clean run open errors.log
+    2. Run TEST-ERR-003 (permission denied) and open errors.log
+  Expected:
+    - errors.log is empty after a clean run
+    - after TEST-ERR-003 it contains "Permission denied" lines
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-LOG-003  VERBOSE MODE
+  Steps:
+    1. python organizer.py --source SRC --verbose -y  (fresh folder)
+    2. Search organizer.log for "Skipping"
+  Expected: DEBUG lines "Skipping ... .hidden_file" etc.
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-LOG-004  7-DAY RETENTION
+  Steps:
+    1. Open logger.py and check TimedRotatingFileHandler uses
+       when="midnight" and backupCount=retention_days
+    2. Check config.json "log_retention_days" is 7
+  Expected: both true (older daily files are deleted automatically
+            at midnight rollover)
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 11 - REPORT
+================================================================
+
+TEST-REP-001  CONSOLE REPORT
+  Steps:
+    1. Run TEST-TYPE-001 and read the report
+  Expected: mode, files organized, total size, duration,
+            per-category count and size, errors count
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-REP-002  EXPORT TEXT REPORT
+  Steps:
+    1. python organizer.py --source SRC --report txt  (fresh folder)
+  Expected: "Report saved: ...report_<date>_<time>.txt" and the
+            file content matches the console report
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-REP-003  EXPORT JSON REPORT
+  Steps:
+    1. python organizer.py --source SRC --report json  (fresh folder)
+    2. python -m json.tool <the saved file>
+  Expected: valid JSON with files_organized, categories,
+            duplicates, error_count, errors
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-REP-004  EXPORT BOTH
+  Steps:
+    1. Run with --report both
+  Expected: one .txt and one .json file in ~/.file_organizer/reports/
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-REP-005  DUPLICATES IN THE REPORT
+  Steps:
+    1. Run TEST-DUP-002 (keep newest)
+  Expected: report shows duplicate groups, wasted space, deleted
+            count and freed space
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 12 - ERROR HANDLING
+================================================================
+
+TEST-ERR-001  SOURCE FOLDER NOT FOUND
+  Steps:
+    1. python organizer.py --source ~/this_folder_does_not_exist
+  Expected: red message "Source folder not found: <path>"
+            Exit code 1. No traceback.
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-ERR-002  SOURCE IS A FILE
+  Steps:
+    1. python organizer.py --source ~/organizer_test/notes.txt
+  Expected: "Source is not a folder: <path>"  Exit code 1
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-ERR-003  PERMISSION DENIED  (Mac / Linux, NOT as root)
+  Steps:
+    1. Reset test folder
+    2. mkdir ~/organizer_test/Images && chmod 555 ~/organizer_test/Images
+    3. python organizer.py --source SRC -y
+  Expected:
+    - Report: "Errors: 4" (the 4 image files) with
+      "Permission denied: <file>" lines
+      (a normal user is needed - the root / Administrator account
+      ignores folder permissions)
+    - All other files are organized normally
+    - The 4 images stay in the top folder
+    - Exit code 1; errors.log has the entries
+  Cleanup: chmod 755 ~/organizer_test/Images
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-ERR-004  FILE IN USE  (Windows only)
+  Steps:
+    1. Reset, open report.pdf or data.csv in another program that
+       locks it (for example Excel for a .csv or .xlsx file)
+    2. python organizer.py --source SRC -y
+  Expected: "File is in use by another program: <file>" in the
+            report; every other file is moved; run finishes
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-ERR-005  DISK FULL  (optional, advanced)
+  Steps:
+    1. Make a very small drive as destination, e.g. on Linux:
+       sudo mount -t tmpfs -o size=1m tmpfs /mnt/small
+    2. python organizer.py --source SRC --dest /mnt/small -y
+       (medium_video.mkv is 2 MB)
+  Expected:
+    - "Disk is full - stopping. Free some space and run again."
+    - No half-copied file is left in the destination
+    - Files moved before the stop can be restored with --undo
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-ERR-006  CTRL+C ON A NORMAL RUN
+  Steps:
+    1. Start a long run (see TEST-UNDO-009) and press Ctrl+C
+  Expected: "Stopped by user." with no Python traceback
+  Result: [ ]
+  Notes: __________________________________________________
+
+================================================================
+MODULE 13 - CROSS-PLATFORM AND PERFORMANCE
+================================================================
+
+TEST-PLAT-001  PATHS WITH SPACES
+  Steps:
+    1. Make a folder "My Test Folder" with a few files
+    2. python organizer.py --source "My Test Folder" -y
+  Expected: works; folders are created inside it
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PLAT-002  HOME SHORTCUT  (Mac / Linux)
+  Steps:
+    1. python organizer.py --source ~/organizer_test --preview
+  Expected: ~ is expanded to your home folder; works
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PLAT-003  COLOURS ON THIS OS
+  Steps:
+    1. Run any command on Windows (cmd and PowerShell), Mac, Linux
+  Expected: colours render correctly on every terminal
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PLAT-004  FILE NAMES WITH SPECIAL CHARACTERS
+  Steps:
+    1. Create files named "résumé final.pdf" and "photo (1).jpg"
+    2. Organize and undo
+  Expected: both move to the right folders and undo restores them
+  Result: [ ]
+  Notes: __________________________________________________
+
+TEST-PLAT-005  MANY FILES
+  Steps:
+    1. Create 1000 small files with mixed extensions
+    2. Time: python organizer.py --source <folder> -y
+    3. Run --undo -y
+  Expected: organize and undo each finish in a few seconds;
+            all 1000 files are restored
+  Result: [ ]
+  Notes: __________________________________________________
+
+----------------------------------------------------------------
+BUG LOG TEMPLATE
+----------------------------------------------------------------
+
+Use this table to track any FAIL results:
+
+BUG-001
+  Test Case  : TEST-___-___
+  Description: [What went wrong]
+  Steps to Reproduce: [Steps]
+  Expected   : [What should happen]
+  Actual     : [What actually happened]
+  Priority   : P1 / P2 / P3
+  Status     : Open / Fixed / Deferred
+  Fix Applied: [What you changed to fix it]
+
+----------------------------------------------------------------
+FINAL TEST SUMMARY   (fill in after YOU have run the tests)
+----------------------------------------------------------------
+
+Operating system tested : ______________________
+Python version          : ______________________
+
+Total Test Cases   : 85
+Passed  [P]        : ____
+Failed  [F]        : ____
+Skipped [S]        : ____
+Blocked [B]        : ____
+Pass Rate          : ____ %
+
+Sign-off: _________________ Date: _____________
+
+================================================================
+END OF MANUAL TESTING DOCUMENT
+================================================================

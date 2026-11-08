@@ -1,0 +1,395 @@
+================================================================
+  PAPER DESIGN - WIREFRAMES (ASCII)
+  Project  : Automatic File Organizer (Command Line Tool)
+  Author   : Hruthik
+  Note     : Draw these on paper using these as reference.
+             This tool has no windows - its "screens" are what
+             you see in the terminal, plus the structure behind
+             it. [] = button/option, {} = user input
+================================================================
+
+----------------------------------------------------------------
+SCREEN 1 - PROJECT STRUCTURE (modules)
+----------------------------------------------------------------
+
+file_organizer/
+  |
+  +-- organizer.py   MAIN: argparse + FileOrganizer class
+  |                  (plan, preview, organize, undo, duplicates,
+  |                   scheduling)
+  +-- scanner.py     FileScanner  (find files, info, duplicates)
+  +-- mover.py       FileMover    (move, rename, rollback)
+  +-- reporter.py    ReportGenerator (stats + txt/json export)
+  +-- config.py      Config       (loads config.json)
+  +-- logger.py      setup_logging (organizer.log, errors.log)
+  +-- utils.py       helpers (sizes, md5, hidden files, colours)
+  +-- config.json    categories + settings (user editable)
+  +-- requirements.txt
+  +-- README.md
+
+Data kept outside the project (in the user's home folder):
+
+  ~/.file_organizer/
+      logs/        organizer.log   errors.log   (7 days kept)
+      operations/  ops_<date>_<time>.json      (one per run)
+      reports/     report_<date>_<time>.txt / .json
+
+
+----------------------------------------------------------------
+SCREEN 2 - CLASS DIAGRAM
+----------------------------------------------------------------
+
++---------------------+        +------------------------+
+|     FileScanner     |        |       FileMover        |
++---------------------+        +------------------------+
+| scan_directory()    |        | move_file()            |
+| get_file_info()     |        | rename_if_duplicate()  |
+| get_file_type()     |        | create_folder_if_not_  |
+| find_duplicates()   |        |        exists()        |
++---------------------+        | rollback()             |
+          ^                    +------------------------+
+          |  uses                         ^
+          |                               | uses
++-------------------------------------------------------+
+|                    FileOrganizer                      |
++-------------------------------------------------------+
+| organize(mode)        preview_organize(mode)          |
+| undo_organize()       handle_duplicates()             |
+| get_destination_folder()                              |
++-------------------------------------------------------+
+          |  creates                          | reads
+          v                                   v
++---------------------+        +------------------------+
+|   ReportGenerator   |        |         Config         |
++---------------------+        +------------------------+
+| generate_summary()  |        | categories (config.json)|
+| print_stats()       |        | get_category()         |
+| export_to_txt()     |        | add_category()         |
+| export_to_json()    |        | exclude / size limits  |
++---------------------+        +------------------------+
+
+Small data classes:  FileInfo (scanner)  Operation (mover)
+                     PlannedMove (organizer)
+
+
+----------------------------------------------------------------
+SCREEN 3 - PROGRAM FLOW
+----------------------------------------------------------------
+
+   python organizer.py <options>
+              |
+              v
+     +------------------+
+     | Parse arguments  |---- bad input ----> usage error (exit 2)
+     +------------------+
+              |
+              v
+     +------------------+
+     | Load config.json |---- corrupt -----> use defaults
+     | Start logging    |
+     +------------------+
+              |
+     +--------+---------+----------------+----------------+
+     |                  |                |                |
+  --undo          --duplicates      --schedule X     (normal run)
+     |                  |                |                |
+     v                  v                |                v
+ find newest       scan + MD5            |         scan folder
+ operation log     group files           |         build plan
+     |                  |                |                |
+ ask Y/N          choose keep           loop:       --preview ?
+     |            newest / oldest       run job            |
+ move files             |               every X h     show plan
+ back                ask Y/N               |          ask Y/N
+     |                  |                 |                |
+     +---------+--------+-----------------+----------------+
+                         |
+                         v
+                move files / delete files
+                save operation log (JSON)
+                         |
+                         v
+                  print report  (+ export if --report)
+
+
+----------------------------------------------------------------
+SCREEN 4 - HELP SCREEN   (python organizer.py --help)
+----------------------------------------------------------------
+
++----------------------------------------------------------+
+| usage: organizer.py [-h] [--source SOURCE] [--dest DEST] |
+|        [--mode {type,date,size,combined}] [--preview]   |
+|        [--undo] [--duplicates] [--keep {newest,oldest}]  |
+|        [--schedule HOURS] [--recursive] [--yes]          |
+|        [--config CONFIG] [--add-category NAME=ext1,ext2] |
+|        [--exclude FOLDER] [--report {txt,json,both}]     |
+|        [--verbose]                                       |
+|                                                          |
+| Automatically organize files into folders (with preview, |
+| undo and scheduling).                                    |
++----------------------------------------------------------+
+
+
+----------------------------------------------------------------
+SCREEN 5 - NORMAL RUN   (--source ~/Downloads)
+----------------------------------------------------------------
+
++----------------------------------------------------------+
+| Organizing: 100%|##########| 5/5 [00:00<00:00, 4577 file/s]|
+|                                                          |
+| Report                                      <- magenta   |
+| ======                                                   |
+| Mode            : type                                   |
+| Files organized : 5                         <- green     |
+| Total size      : 1.9 MB                                 |
+| Duration        : 0.01 s                                 |
+|                                                          |
+| Per category                                             |
+|   Audio              1 files          2 B                |
+|   Documents          2 files          6 B                |
+|   Images             1 files          4 B                |
+|   Others             1 files       1.9 MB                |
+|                                                          |
+| Errors: 0                                   <- green     |
++----------------------------------------------------------+
+
+NOTES FOR PAPER SKETCH:
+- Progress bar first, report after it
+- Headers magenta, success green, warnings yellow, errors red
+
+
+----------------------------------------------------------------
+SCREEN 6 - PREVIEW   (--preview --mode combined)
+----------------------------------------------------------------
+
++----------------------------------------------------------+
+| Preview (combined mode)                                  |
+| =======================                                  |
+| 5 files will be moved                                    |
+|                                                          |
+| By category                                              |
+|   Audio              1 files          2 B                |
+|   Documents          2 files          6 B                |
+|   Images             1 files          4 B                |
+|   Others             1 files       1.9 MB                |
+|                                                          |
+| Destination folders          <- only for date/size/combined
+|   Audio/2026/November              1 files               |
+|   Documents/2026/November          2 files               |
+|   Images/2026/November             1 files               |
+|   Others/2026/November             1 files               |
+|                                                          |
+| Sample moves                                             |
+|   song.mp3  ->  ~/Downloads/Audio/2026/November          |
+|   p.jpg     ->  ~/Downloads/Images/2026/November         |
+|   ... (first 10 shown, then "... and N more")            |
+|                                                          |
+| Proceed with these moves? [y/N]: {      }                |
++----------------------------------------------------------+
+
+If N (or just Enter):   Cancelled - no files were moved.
+
+
+----------------------------------------------------------------
+SCREEN 7 - UNDO   (--undo)
+----------------------------------------------------------------
+
++----------------------------------------------------------+
+| Undo last run                                            |
+| =============                                            |
+| Run from   : 2026-11-04T10:48:24                         |
+| Source     : ~/Downloads                                 |
+| Mode       : combined                                    |
+| Files      : 5                                           |
+| Move all these files back? [y/N]: {      }               |
+|                                                          |
+| Restored 5 of 5 files.                      <- green     |
++----------------------------------------------------------+
+
+IF NOTHING TO UNDO:
+| Nothing to undo - no operation log found.   <- yellow    |
+
+
+----------------------------------------------------------------
+SCREEN 8 - DUPLICATE FINDER   (--duplicates)
+----------------------------------------------------------------
+
++----------------------------------------------------------+
+| Hashing files: 100%|##########| 19/19                     |
+|                                                          |
+| Duplicate files                                          |
+| ===============                                          |
+| Group 1 (36 B each)                                      |
+|   2026-11-03 09:25  ~/Downloads/dup_a.txt   <- oldest    |
+|   2026-11-06 09:25  ~/Downloads/dup_b.txt                |
+|   2026-11-08 09:25  ~/Downloads/dup_c.txt   <- newest    |
+|                                                          |
+| Delete duplicates? Keep [n]ewest, [o]ldest or [s]kip: {} |
+|                                                          |
+| 2 files (72 B) will be deleted, keeping the newest copy. |
+| Permanently delete them? [y/N]: {      }                 |
++----------------------------------------------------------+
+
+
+----------------------------------------------------------------
+SCREEN 9 - SCHEDULE   (--schedule 6)
+----------------------------------------------------------------
+
++----------------------------------------------------------+
+| [2026-11-08 09:24] Scheduled run starting                |
+| Organizing: 100%|##########| 1/1                          |
+| Report ... (same as Screen 5)                            |
+|                                                          |
+| Scheduled every 6 hour(s). Press Ctrl+C to stop.         |
+|                                                          |
+|  ...waits...  (runs again after 6 hours)                 |
++----------------------------------------------------------+
+
+
+----------------------------------------------------------------
+SCREEN 10 - ERROR MESSAGES
+----------------------------------------------------------------
+
+Source folder missing   (red, exit code 1)
+  Source folder not found: /home/me/Nope
+
+Bad option              (exit code 2)
+  organizer.py: error: argument --mode: invalid choice: 'bogus'
+  (choose from 'type', 'date', 'size', 'combined')
+
+No source given         (exit code 2)
+  organizer.py: error: --source is required (or use --undo)
+
+Bad schedule value      (exit code 2)
+  --schedule needs a positive number of hours
+
+Permission denied / file in use   (listed in report, run goes on)
+  Errors: 1
+    - Permission denied: /home/me/Downloads/locked.pdf
+
+Disk full               (run stops, earlier moves can be undone)
+  Disk is full - stopping. Free some space and run again.
+
+
+----------------------------------------------------------------
+SCREEN 11 - FOLDER RESULT FOR EACH MODE
+----------------------------------------------------------------
+
+BEFORE:                      MODE type (default):
+Downloads/                   Downloads/
+  photo.jpg                    Images/photo.jpg
+  report.pdf                   Documents/report.pdf
+  song.mp3                     Audio/song.mp3
+  setup.exe                    Executables/setup.exe
+  mystery.xyz                  Others/mystery.xyz
+
+MODE date:                   MODE size:
+Downloads/                   Downloads/
+  2026/November/photo.jpg      Small/photo.jpg      (< 1 MB)
+  2026/November/report.pdf     Medium/movie.mkv     (1-100 MB)
+  2025/March/old.jpg           Large/game.iso       (> 100 MB)
+
+MODE combined:
+Downloads/
+  Images/2026/November/photo.jpg
+  Documents/2026/November/report.pdf
+  Images/2025/March/old.jpg
+
+NAME CLASH:  Images/photo.jpg already exists
+  -> new file is saved as  Images/photo_1.jpg
+  -> next one              Images/photo_2.jpg
+
+
+----------------------------------------------------------------
+SCREEN 12 - OPERATION LOG (undo file)
+----------------------------------------------------------------
+
+~/.file_organizer/operations/ops_20261108_092405_123456.json
+
+{
+  "timestamp": "2026-11-08T09:24:05",
+  "source": "/home/me/Downloads",
+  "dest":   "/home/me/Downloads",
+  "mode":   "type",
+  "operations": [
+    {
+      "src":  "/home/me/Downloads/photo.jpg",
+      "dest": "/home/me/Downloads/Images/photo.jpg",
+      "timestamp": "2026-11-08T09:24:05"
+    },
+    ... one entry per moved file ...
+  ]
+}
+
+Undo = read this file, move every "dest" back to its "src",
+newest move first, then rename the log to .undone
+
+
+----------------------------------------------------------------
+SCREEN 13 - config.json
+----------------------------------------------------------------
+
+{
+  "categories": {
+    "Images":    ["jpg", "jpeg", "png", ...],
+    "Videos":    [...],
+    ...
+  },
+  "default_category": "Others",
+  "exclude_folders":  ["node_modules", ".git", "__pycache__"],
+  "skip_extensions":  ["crdownload", "part", "tmp", ...],
+  "size_limits_mb":   { "small": 1, "large": 100 },
+  "log_retention_days": 7,
+  "default_mode": "type"
+}
+
+
+----------------------------------------------------------------
+SCREEN 14 - EXPORTED TEXT REPORT (--report txt)
+----------------------------------------------------------------
+
+FILE ORGANIZER REPORT
+=====================
+Generated : 2026-11-08T09:24:05
+Source    : /home/me/Downloads
+Dest      : /home/me/Downloads
+Mode      : type
+Duration  : 0.01 s
+
+Files organized : 3
+Total size      : 9 B
+
+Per category:
+  Documents          1 files         3 B
+  ...
+
+Duplicates: 0 groups, 0 files, 0 B wasted
+Deleted duplicates: 0 (freed 0 B)
+
+Errors: 0
+
+
+================================================================
+PAPER DRAWING TIPS
+================================================================
+
+When drawing on paper:
+
+1. Use a ruler for the boxes
+2. Draw the flow chart (Screen 3) first - it explains the tool
+3. Draw the class diagram (Screen 2) second
+4. Use different pen colours:
+   - Black pen : boxes and text
+   - Green pen : success messages
+   - Red pen   : errors
+   - Yellow    : warnings
+   - Pencil    : notes and annotations
+5. Use these symbols consistently:
+   [  ] = option / button
+   {  } = text the user types
+   ->   = a file being moved
+   <-   = annotation arrow
+
+================================================================
+END OF PAPER DESIGN DOCUMENT
+================================================================

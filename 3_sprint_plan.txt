@@ -1,0 +1,362 @@
+================================================================
+  SPRINT PLAN
+  Project  : Automatic File Organizer (Command Line Tool)
+  Author   : Hruthik
+  Total    : 5 Sprints  |  ~10 Days  |  Solo Dev
+  Format   : Each sprint = 2 days approx
+================================================================
+
+SPRINT OVERVIEW
+---------------
+  Sprint 1  ->  Project Setup + Config + Logging + Utilities
+  Sprint 2  ->  Scanner + Mover (the core engine)
+  Sprint 3  ->  Organizer: Modes + Preview + Undo
+  Sprint 4  ->  Duplicates + Report + CLI + Scheduling
+  Sprint 5  ->  Polish + Testing + Documentation
+
+PRIORITY SCALE
+  [P1] Must have - core feature, blocks other work
+  [P2] Should have - important for completeness
+  [P3] Nice to have - polish, can defer if short on time
+
+STATUS OPTIONS
+  [ ] Not started
+  [~] In progress
+  [x] Done
+  [!] Blocked
+
+NOTE ON STATUS
+  [x] = built and checked by running the tool.
+  [~] / [ ] = needs YOU (checking on Windows / macOS, running the
+  full manual test document, signing off).
+
+================================================================
+SPRINT 1 - PROJECT SETUP + CONFIG + LOGGING + UTILITIES
+Duration : Day 1-2
+Goal     : Project skeleton runs, config loads, logs are written
+================================================================
+
+TASK-001  Create project folder and virtual environment  [P1] [x]
+  - mkdir file_organizer && cd file_organizer
+  - python -m venv venv  (then activate it)
+  - Verify: python --version shows 3.10 or newer
+  Estimated time: 10 min
+
+TASK-002  Install packages + requirements.txt            [P1] [x]
+  - pip install schedule colorama tqdm
+  - requirements.txt contains:
+      schedule>=1.2.0
+      colorama>=0.4.6
+      tqdm>=4.66.0
+  Estimated time: 10 min
+
+TASK-003  Create config.json                             [P1] [x]
+  - categories: Images, Videos, Audio, Documents, Code,
+    Archives, Executables (everything else = Others)
+  - exclude_folders: node_modules, .git, __pycache__
+  - skip_extensions: crdownload, part, tmp, download, partial
+  - size_limits_mb: small 1, large 100
+  - log_retention_days: 7, default_mode: type
+  Estimated time: 15 min
+
+TASK-004  Create config.py (class Config)                [P1] [x]
+  - Load config.json; create it with defaults if missing
+  - Corrupt JSON -> fall back to defaults (log the error)
+  - get_category(extension) with a fast lookup table
+  - add_category(), add_exclude(), save()
+  - Folders for logs / operation logs / reports in ~/.file_organizer
+  Estimated time: 40 min
+
+TASK-005  Create logger.py                               [P1] [x]
+  - organizer.log (INFO and above) + errors.log (ERROR only)
+  - Timestamp, level, module name, message
+  - TimedRotatingFileHandler: rotate at midnight, keep 7 days
+  - If the log folder cannot be created, never crash
+  Estimated time: 30 min
+
+TASK-006  Create utils.py                                [P1] [x]
+  - format_size(bytes) -> "1.5 MB"
+  - month_name(date) -> English month name
+  - md5_hash(path) -> read in 1 MB chunks
+  - is_hidden(path), is_system_file(path)
+    (dot-files, Windows Hidden/System attributes, Thumbs.db ...)
+  - confirm(prompt) -> yes/no question, default No
+  - print_info / success / warning / error / header (colorama)
+  Estimated time: 40 min
+
+SPRINT 1 DONE WHEN:
+  [x] python -c "import config, logger, utils" works
+  [x] config.json loads and "jpg" maps to Images
+  [x] Corrupt config.json does not crash the tool
+  [x] Log files appear in ~/.file_organizer/logs/
+
+================================================================
+SPRINT 2 - SCANNER + MOVER (THE CORE ENGINE)
+Duration : Day 3-4
+Goal     : Find files and move them safely
+================================================================
+
+TASK-007  Create FileInfo + FileScanner.scan_directory   [P1] [x]
+  - FileInfo dataclass: path, name, extension, size,
+    modified, category
+  - scan_directory(path, recursive, skip_dirs)
+  - Errors: folder not found, path is a file, unreadable folder
+  Estimated time: 45 min
+
+TASK-008  get_file_info + get_file_type                  [P1] [x]
+  - get_file_info(path) -> name, extension, size, modified date
+  - get_file_type(extension) -> category name
+  Estimated time: 20 min
+
+TASK-009  Skip rules in the scanner                      [P1] [x]
+  - Skip hidden files, system files, symlinks
+  - Skip unfinished downloads (.crdownload, .part ...)
+  - Skip excluded folders (node_modules ...)
+  Estimated time: 25 min
+
+TASK-010  FileScanner.find_duplicates                    [P1] [x]
+  - Group files by size first (unique size = not a duplicate)
+  - MD5 hash only the same-size files (tqdm progress bar)
+  - Return {hash: [files]} for groups of 2 or more
+  - Ignore empty files
+  Estimated time: 35 min
+
+TASK-011  FileMover: folders + rename_if_duplicate       [P1] [x]
+  - create_folder_if_not_exists(path)
+  - rename_if_duplicate(dest): photo.jpg -> photo_1.jpg -> _2
+  Estimated time: 20 min
+
+TASK-012  FileMover.move_file with error handling        [P1] [x]
+  - Operation dataclass (src, dest, timestamp)
+  - PermissionError -> "Permission denied" / "File in use"
+  - ENOSPC -> DiskFullError (stop the run, clean partial file)
+  - Missing source file -> FileMoveError
+  Estimated time: 40 min
+
+TASK-013  FileMover.rollback                             [P1] [x]
+  - Reverse operations newest first
+  - Never overwrite: use rename_if_duplicate on restore
+  - Remove folders that become empty (never the destination root)
+  - Return (restored_count, failures)
+  Estimated time: 40 min
+
+TASK-014  Test scanner and mover                         [P1] [x]
+  - Make a folder with all file types, hidden file,
+    .crdownload file and node_modules folder
+  - Verify hidden / excluded files are skipped
+  - Move a file twice into the same folder -> _1 name
+  - Roll back and verify the original state
+  Estimated time: 30 min
+
+SPRINT 2 DONE WHEN:
+  [x] Scanner returns only eligible files
+  [x] Hidden, system, .crdownload and node_modules are skipped
+  [x] Name clashes produce _1, _2 and never overwrite
+  [x] Rollback restores every file
+
+================================================================
+SPRINT 3 - ORGANIZER: MODES + PREVIEW + UNDO
+Duration : Day 5-6
+Goal     : Organize in 4 modes, preview first, undo any run
+================================================================
+
+TASK-015  FileOrganizer class + paths                    [P1] [x]
+  - __init__(source, dest, config, recursive)
+  - Without --dest, the destination is the source folder
+  - PlannedMove dataclass (file + target folder)
+  Estimated time: 20 min
+
+TASK-016  get_destination_folder (4 modes)               [P1] [x]
+  - type     -> <dest>/Images
+  - date     -> <dest>/2026/November
+  - size     -> Small (<1 MB) / Medium / Large (>100 MB)
+  - combined -> <dest>/Images/2026/November
+  - Unknown mode -> clear error
+  Estimated time: 30 min
+
+TASK-017  _make_plan                                     [P1] [x]
+  - Scan the source, decide a folder for every file
+  - Skip files already in the right folder
+  - Do not re-scan a --dest folder inside the source
+  Estimated time: 25 min
+
+TASK-018  preview_organize()                             [P1] [x]
+  - Total count, count + size per category
+  - Destination folders for date / size / combined
+  - First 10 sample moves, "... and N more"
+  Estimated time: 35 min
+
+TASK-019  organize(mode) + operation log                 [P1] [x]
+  - Move every planned file (tqdm progress bar)
+  - Continue after a single-file error, stop on disk full
+  - Save ops_<timestamp>.json after the run
+  Estimated time: 40 min
+
+TASK-020  undo_organize()                                [P1] [x]
+  - Read the newest operation log, show a summary, ask Y/N
+  - Roll back, report restored count
+  - Keep only failed moves in the log for a retry
+  - Rename a fully undone log to .undone (next undo = older run)
+  Estimated time: 40 min
+
+TASK-021  Test organize / preview / undo                 [P1] [x]
+  - Run all four modes on a test folder
+  - Preview + answer N -> nothing moves
+  - Organize, undo, compare folder before and after
+  - Undo twice -> second undo reverses the earlier run
+  Estimated time: 30 min
+
+SPRINT 3 DONE WHEN:
+  [x] All 4 modes create the right folders
+  [x] Preview moves nothing and asks Y/N
+  [x] Undo restores every file and removes empty folders
+  [x] Running --undo with no log shows a friendly message
+
+================================================================
+SPRINT 4 - DUPLICATES + REPORT + CLI + SCHEDULING
+Duration : Day 7-8
+Goal     : Complete command line tool with reports and scheduling
+================================================================
+
+TASK-022  Create reporter.py (ReportGenerator)           [P1] [x]
+  - record_move / record_error / record_deleted
+  - generate_summary() -> dictionary
+  - print_stats() -> coloured terminal report
+  - export_to_txt() and export_to_json()
+  Estimated time: 50 min
+
+TASK-023  handle_duplicates()                            [P2] [x]
+  - Show groups with modified date/time
+  - Ask: keep [n]ewest, [o]ldest or [s]kip (or --keep)
+  - Final confirmation before deleting (or --yes)
+  - Report deleted files and space freed
+  Estimated time: 45 min
+
+TASK-024  argparse CLI in organizer.py                   [P1] [x]
+  - --source --dest --mode --preview --undo --duplicates
+    --schedule (as in the project brief)
+  - main() returns exit codes 0 / 1 / 2 / 130
+  Estimated time: 40 min
+
+TASK-025  Config options on the command line             [P2] [x]
+  - --config PATH, --add-category NAME=ext1,ext2, --exclude
+  - Changes are saved to the config file
+  Estimated time: 25 min
+
+TASK-026  Scheduling with the schedule library           [P2] [x]
+  - Run once immediately, then every X hours
+  - Errors inside a job are logged, scheduler keeps running
+  - Ctrl+C stops cleanly
+  Estimated time: 25 min
+
+TASK-027  Error handling pass                            [P1] [x]
+  - Source folder not found / not a folder
+  - Permission denied, file in use, disk full, vanished file
+  - Bad arguments and bad --schedule value
+  Estimated time: 30 min
+
+TASK-028  Test the full command line                     [P1] [x]
+  - Run every example command from the project brief
+  - Export txt and json reports
+  - Run --schedule for a few seconds and stop with Ctrl+C
+  Estimated time: 30 min
+
+SPRINT 4 DONE WHEN:
+  [x] All 7 example commands from the brief work
+  [x] Duplicates are grouped, shown and deleted as chosen
+  [x] Report shows files, categories, size, duplicates, errors
+  [x] --schedule runs immediately and then waits
+
+================================================================
+SPRINT 5 - POLISH + TESTING + DOCUMENTATION
+Duration : Day 9-10
+Goal     : Reliable on every OS and ready to show
+================================================================
+
+TASK-029  Cross-platform check                           [P2] [~]
+  - Linux: verified
+  - Windows: run the manual tests, check colours, hidden files
+    (attrib +h file) and a file open in another program
+  - macOS: run the manual tests, check .DS_Store is skipped
+  Estimated time: 45 min
+
+TASK-030  Manual testing (full run)                      [P1] [ ]
+  - Execute all test cases in 4_manual_testing.txt
+  - Write PASS / FAIL for each, log any bug found
+  - Fix P1 bugs, defer cosmetic ones (P3)
+  Estimated time: 90 min
+
+TASK-031  Code quality pass                              [P2] [x]
+  - Type hints, docstrings and helpful comments everywhere
+  - PEP 8 style (line length, naming, imports)
+  Estimated time: 30 min
+
+TASK-032  Write README.md                                [P3] [x]
+  - Description, install, usage, options, safety, structure
+  Estimated time: 30 min
+
+TASK-033  Prepare interview notes                        [P3] [x]
+  - What to say about the project
+  - Python concepts it teaches
+  - Common interview questions it covers
+  Estimated time: 30 min
+
+TASK-034  Package the project                            [P3] [x]
+  - Zip file_organizer/ (no venv, no __pycache__)
+  Estimated time: 5 min
+
+SPRINT 5 DONE WHEN:
+  [ ] All manual tests have a PASS / FAIL result
+  [ ] Tested on at least two operating systems
+  [x] README written
+  [x] Project zipped
+
+================================================================
+TASK SUMMARY TABLE
+================================================================
+
+Sprint  Task     Description                          Priority Status
+------  -------  -----------------------------------  -------- ------
+  1     001      Folder + virtual environment           P1     [x]
+  1     002      Packages + requirements.txt            P1     [x]
+  1     003      config.json                            P1     [x]
+  1     004      config.py (Config)                     P1     [x]
+  1     005      logger.py                              P1     [x]
+  1     006      utils.py                               P1     [x]
+  2     007      FileInfo + scan_directory              P1     [x]
+  2     008      get_file_info / get_file_type          P1     [x]
+  2     009      Skip rules                             P1     [x]
+  2     010      find_duplicates (MD5)                  P1     [x]
+  2     011      create folder + rename_if_duplicate    P1     [x]
+  2     012      move_file + error handling             P1     [x]
+  2     013      rollback                               P1     [x]
+  2     014      Test scanner and mover                 P1     [x]
+  3     015      FileOrganizer class                    P1     [x]
+  3     016      4 organization modes                   P1     [x]
+  3     017      _make_plan                             P1     [x]
+  3     018      preview_organize                       P1     [x]
+  3     019      organize + operation log               P1     [x]
+  3     020      undo_organize                          P1     [x]
+  3     021      Test organize / preview / undo         P1     [x]
+  4     022      ReportGenerator                        P1     [x]
+  4     023      Duplicate handling                     P2     [x]
+  4     024      argparse CLI                           P1     [x]
+  4     025      Config command-line options            P2     [x]
+  4     026      Scheduling                             P2     [x]
+  4     027      Error handling pass                    P1     [x]
+  4     028      Full command line test                 P1     [x]
+  5     029      Cross-platform check                   P2     [~]
+  5     030      Manual testing (full run)              P1     [ ]
+  5     031      Code quality pass                      P2     [x]
+  5     032      README.md                              P3     [x]
+  5     033      Interview notes                        P3     [x]
+  5     034      Package the project                    P3     [x]
+
+TOTAL TASKS : 34
+P1 (Must)   : 26
+P2 (Should) : 5
+P3 (Nice)   : 3
+
+================================================================
+END OF SPRINT PLAN
+================================================================

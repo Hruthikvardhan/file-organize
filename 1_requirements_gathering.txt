@@ -1,0 +1,319 @@
+================================================================
+  REQUIREMENTS GATHERING DOCUMENT
+  Project  : Automatic File Organizer (Command Line Tool)
+  Author   : Hruthik
+  Version  : 1.0
+  Date     : November 2026
+================================================================
+
+----------------------------------------------------------------
+SECTION 1 - PROJECT OVERVIEW
+----------------------------------------------------------------
+
+Project Name     : Automatic File Organizer
+Project Type     : Command-line application (no GUI, no server)
+Developer        : Hruthik
+Technology Stack : Python 3.10+
+                   Standard library: os, shutil, pathlib, datetime,
+                   argparse, logging, json, hashlib, re
+                   Extra packages (3 only): schedule, colorama, tqdm
+Platforms        : Windows, macOS, Linux
+Deployment       : None - runs locally on the user's computer
+Purpose          : To clean up messy folders (such as Downloads)
+                   automatically, safely and reversibly, and to
+                   demonstrate clean, well-structured Python code
+                   (OOP, file handling, CLI design, logging,
+                   error handling) in a portfolio / interviews
+
+----------------------------------------------------------------
+SECTION 2 - STAKEHOLDER INFORMATION
+----------------------------------------------------------------
+
+Stakeholder      : Hruthik (developer and first user)
+End Users        : Anyone with a cluttered folder who is
+                   comfortable running a command in a terminal
+Goal             : A tool that is safe enough to run on a real
+                   Downloads folder - it previews first, never
+                   overwrites, and every run can be undone
+
+----------------------------------------------------------------
+SECTION 3 - FUNCTIONAL REQUIREMENTS
+----------------------------------------------------------------
+
+FR-01  FILE SCANNING  (class FileScanner)
+  FR-01.1  scan_directory(path) returns every eligible file
+  FR-01.2  get_file_info(path) returns name, extension, size,
+           modified date (and category)
+  FR-01.3  get_file_type(extension) returns the category name
+  FR-01.4  Hidden files are skipped (dot-files on Mac/Linux and
+           the Hidden attribute on Windows)
+  FR-01.5  System files are skipped (desktop.ini, Thumbs.db,
+           .DS_Store, pagefile.sys ... and the Windows System
+           attribute)
+  FR-01.6  Unfinished downloads are skipped (.crdownload, .part,
+           .tmp, .download, .partial - configurable)
+  FR-01.7  Symbolic links are skipped
+  FR-01.8  Excluded folders are never entered (default:
+           node_modules, .git, __pycache__ - configurable)
+  FR-01.9  Sub-folders are scanned only when --recursive is given
+  FR-01.10 A folder the tool cannot read is logged and skipped,
+           the scan continues
+
+FR-02  CATEGORISATION
+  FR-02.1  Default categories live in config.json:
+           Images      jpg jpeg png gif bmp svg webp ico tiff
+           Videos      mp4 avi mkv mov wmv flv webm
+           Audio       mp3 wav flac aac ogg m4a
+           Documents   pdf doc docx txt xls xlsx ppt pptx csv
+           Code        py java js html css cpp c json xml sql
+           Archives    zip rar tar gz 7z
+           Executables exe msi dmg pkg deb
+           Others      everything else
+  FR-02.2  Extension matching is case-insensitive (PNG = png)
+  FR-02.3  Files with no extension or an unknown extension go to
+           "Others"
+  FR-02.4  Users can add categories / extensions without editing
+           code (config.json or --add-category NAME=ext1,ext2)
+  FR-02.5  An extension belongs to only one category (adding it
+           to a new category removes it from the old one)
+
+FR-03  ORGANIZATION MODES
+  FR-03.1  type (default)  -> Images/, Documents/, Audio/ ...
+  FR-03.2  date            -> 2026/November/ (year / month name)
+  FR-03.3  size            -> Small (< 1 MB), Medium (1-100 MB),
+                              Large (> 100 MB)
+  FR-03.4  combined        -> Images/2026/November/
+  FR-03.5  Date comes from the file's last-modified time
+  FR-03.6  Month names are always English (not locale dependent)
+  FR-03.7  Size limits (1 MB / 100 MB) are configurable
+  FR-03.8  --dest puts organized folders somewhere else; without
+           it the folders are created inside --source
+  FR-03.9  A file already in its correct folder is left alone
+  FR-03.10 If --dest is inside --source it is not re-scanned
+
+FR-04  FILE MOVING  (class FileMover)
+  FR-04.1  move_file(src, dest) moves a file and returns an
+           operation record (src, dest, timestamp)
+  FR-04.2  create_folder_if_not_exists(path) creates missing
+           folders (including parents)
+  FR-04.3  rename_if_duplicate(dest) adds _1, _2 ... to a name
+           that is already taken (photo.jpg -> photo_1.jpg)
+  FR-04.4  An existing file is NEVER overwritten
+  FR-04.5  Moving between drives works (shutil.move)
+  FR-04.6  rollback(operations) reverses a list of moves, newest
+           first
+
+FR-05  PREVIEW MODE
+  FR-05.1  --preview shows what WILL happen without moving files
+  FR-05.2  Shows total files, count and size per category
+  FR-05.3  For date / size / combined modes also shows the
+           destination folders and file count in each
+  FR-05.4  Shows a sample of the first 10 moves
+  FR-05.5  Asks "Proceed with these moves? [y/N]" - default is No
+  FR-05.6  Answering N leaves every file untouched
+  FR-05.7  --yes skips the question
+
+FR-06  UNDO
+  FR-06.1  Every run that moves files writes an operation log
+           (JSON) to ~/.file_organizer/operations/
+  FR-06.2  --undo reverses the most recent run completely
+  FR-06.3  Shows run date, source, mode and file count, then asks
+           for confirmation (skipped with --yes)
+  FR-06.4  Files go back to their exact original path
+  FR-06.5  If the original name is now taken, the restored file
+           gets _1, _2 (nothing is overwritten)
+  FR-06.6  Folders emptied by the undo are removed (the
+           destination root itself is kept)
+  FR-06.7  Files that cannot be restored are reported and stay in
+           the log so --undo can be retried
+  FR-06.8  After a successful undo the log is marked .undone so
+           the next --undo reverses the run before it
+  FR-06.9  "Nothing to undo" message when no log exists
+
+FR-07  DUPLICATE FINDER
+  FR-07.1  --duplicates scans the source (recursively) for files
+           with identical content
+  FR-07.2  Uses MD5 hashes, read in 1 MB chunks (low memory)
+  FR-07.3  Only files that share a size are hashed (speed)
+  FR-07.4  Empty files are ignored
+  FR-07.5  Duplicates are shown in groups with modified date/time
+  FR-07.6  User chooses: keep [n]ewest, keep [o]ldest or [s]kip
+  FR-07.7  --keep newest|oldest chooses without asking
+  FR-07.8  A final confirmation is shown before deleting
+           (skipped with --yes)
+  FR-07.9  Report shows groups found, space wasted, files deleted
+           and space freed
+
+FR-08  SCHEDULING
+  FR-08.1  --schedule X runs the organizer now, then every X hours
+  FR-08.2  X may be a decimal number (0.5 = every 30 minutes)
+  FR-08.3  X must be greater than 0
+  FR-08.4  A failure in one scheduled run is logged and does not
+           stop the scheduler
+  FR-08.5  Ctrl+C stops the scheduler cleanly
+
+FR-09  CUSTOM CONFIGURATION
+  FR-09.1  Settings are read from config.json (or --config PATH)
+  FR-09.2  Configurable: categories, exclude_folders,
+           skip_extensions, size_limits_mb, log_retention_days,
+           default_mode
+  FR-09.3  --add-category and --exclude change and SAVE the config
+  FR-09.4  Missing config.json is re-created with defaults
+  FR-09.5  Corrupt config.json falls back to built-in defaults
+           (error is logged, tool keeps working)
+
+FR-10  LOGGING
+  FR-10.1  organizer.log records every operation with a timestamp
+  FR-10.2  errors.log records errors only (separate file)
+  FR-10.3  Log files rotate daily and the last 7 days are kept
+  FR-10.4  Logs are stored in ~/.file_organizer/logs/
+  FR-10.5  --verbose also records DEBUG messages
+  FR-10.6  A logging problem never stops the tool
+
+FR-11  REPORT  (class ReportGenerator)
+  FR-11.1  generate_summary() collects all statistics
+  FR-11.2  print_stats() prints a coloured report: files
+           organized, count and size per category, total size,
+           duplicates found, errors, duration
+  FR-11.3  export_to_txt(path) saves a plain-text report
+  FR-11.4  export_to_json(path) saves the report as JSON
+  FR-11.5  --report txt|json|both saves the report to
+           ~/.file_organizer/reports/
+
+FR-12  PROGRESS BAR AND COLOURS
+  FR-12.1  tqdm progress bar while organizing, hashing, deleting
+  FR-12.2  colorama colours: green success, yellow warning,
+           cyan information, red errors (errors go to stderr)
+  FR-12.3  Colours work on Windows, macOS and Linux
+
+FR-13  ERROR HANDLING
+  FR-13.1  Source folder not found -> clear message, exit code 1
+  FR-13.2  Source is a file, not a folder -> clear message
+  FR-13.3  Permission denied -> that file is skipped, error is
+           logged and shown in the report, run continues
+  FR-13.4  File in use (Windows WinError 32) -> same as above,
+           with a specific message
+  FR-13.5  Disk full -> partial copy is removed, run STOPS, moves
+           already done are still saved to the undo log
+  FR-13.6  File vanished during the run -> skipped and reported
+  FR-13.7  Invalid arguments -> usage message, exit code 2
+  FR-13.8  Ctrl+C -> "Stopped by user", exit code 130
+  FR-13.9  Exit codes: 0 success, 1 errors, 2 bad input, 130 stop
+
+FR-14  COMMAND LINE INTERFACE
+  python organizer.py --source ~/Downloads
+  python organizer.py --source ~/Downloads --dest ~/Organized
+  python organizer.py --source ~/Downloads --mode date
+  python organizer.py --source ~/Downloads --preview
+  python organizer.py --undo
+  python organizer.py --source ~/Downloads --duplicates
+  python organizer.py --source ~/Downloads --schedule 6
+  Extra options: --keep, --recursive, --yes/-y, --config,
+  --add-category, --exclude, --report, --verbose
+
+----------------------------------------------------------------
+SECTION 4 - NON-FUNCTIONAL REQUIREMENTS
+----------------------------------------------------------------
+
+NFR-01  SAFETY
+  NFR-01.1  Nothing is ever overwritten
+  NFR-01.2  Every move can be undone
+  NFR-01.3  Deleting files only happens in duplicate mode, only
+            after a clear confirmation
+  NFR-01.4  The tool only touches files inside --source and
+            creates folders inside --dest
+
+NFR-02  PERFORMANCE
+  NFR-02.1  Large files are hashed in chunks (constant memory)
+  NFR-02.2  Duplicate finder hashes only same-size files
+  NFR-02.3  A folder of 1000 files is organized in a few seconds
+
+NFR-03  PORTABILITY
+  NFR-03.1  Windows 10+, macOS, Linux
+  NFR-03.2  Uses pathlib, never hard-coded "/" or "\"
+  NFR-03.3  Python 3.10 or newer
+
+NFR-04  USABILITY
+  NFR-04.1  Helpful --help text for every option
+  NFR-04.2  Coloured, readable output
+  NFR-04.3  Questions have safe defaults (default answer is No)
+
+NFR-05  MAINTAINABILITY
+  NFR-05.1  Type hints on every function
+  NFR-05.2  Docstring on every module, class and function
+  NFR-05.3  PEP 8 style
+  NFR-05.4  One responsibility per module (scanner, mover,
+            reporter, config, logger, utils)
+
+NFR-06  RELIABILITY
+  NFR-06.1  One bad file never stops the whole run
+  NFR-06.2  A bad config or log folder never crashes the tool
+
+NFR-07  PRIVACY
+  NFR-07.1  Everything runs locally, no network access, no
+            telemetry
+
+----------------------------------------------------------------
+SECTION 5 - CONSTRAINTS & ASSUMPTIONS
+----------------------------------------------------------------
+
+CONSTRAINTS
+  - Standard library for all core logic
+  - Only three extra packages: schedule, colorama, tqdm
+  - Command line only (no GUI)
+  - Categories are decided by file extension, not file content
+  - Undo history is stored on the local computer only
+
+ASSUMPTIONS
+  - Python 3.10+ is installed
+  - The user has permission to read and write the folders used
+  - The computer stays on while --schedule is running
+  - The same destination folders are not edited by other programs
+    while a run is in progress
+
+----------------------------------------------------------------
+SECTION 6 - OUT OF SCOPE
+----------------------------------------------------------------
+
+  - Graphical user interface
+  - Cloud storage (Google Drive, OneDrive, Dropbox)
+  - Detecting file type from file content (magic numbers)
+  - Real-time folder watching (only timed schedule)
+  - Renaming files based on their content or metadata (EXIF)
+  - Undoing deleted duplicates (deletion is permanent)
+  - Choosing an older run to undo (only newest first)
+  - Running as an operating-system service
+
+----------------------------------------------------------------
+SECTION 7 - DEPENDENCIES
+----------------------------------------------------------------
+
+Package     Version   Purpose
+----------  --------  ------------------------------------------
+schedule    >= 1.2.0  Run the organizer every X hours
+colorama    >= 0.4.6  Coloured terminal output on every OS
+tqdm        >= 4.66   Progress bars
+
+Standard library: os, shutil, pathlib, datetime, argparse,
+logging, json, hashlib, re (plus errno, dataclasses, collections,
+time, copy, typing)
+
+----------------------------------------------------------------
+SECTION 8 - GLOSSARY
+----------------------------------------------------------------
+
+Category     : A named group of file extensions (e.g. Images)
+Mode         : How files are grouped: type, date, size, combined
+Preview      : Dry run that shows the plan without moving files
+Operation    : One recorded move (source path -> new path)
+Operation log: JSON file listing all moves of one run (for undo)
+Rollback     : Moving files back to where they came from
+Duplicate    : Two or more files with exactly the same content
+MD5 hash     : A short fingerprint of a file's content
+Hidden file  : File not meant to be seen (.name or Hidden flag)
+System file  : File used by the operating system
+Schedule     : Repeating a job automatically every X hours
+
+================================================================
+END OF REQUIREMENTS GATHERING DOCUMENT
+================================================================
